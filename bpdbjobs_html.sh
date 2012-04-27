@@ -1,6 +1,7 @@
 #!/usr/bin/ksh
 
 set -u
+HOSTNAME=`hostname`
 PATH=$PATH:/usr/openv/netbackup//bin/admincmd
 BASEDIR=/home/dntadm2/backup
 UNAME=`uname -a`
@@ -13,6 +14,7 @@ USER=`whoami`
 INPUT_FILE=${BASEDIR}/inputfile
 TMP_FILE=${BASEDIR}/tmpfile
 OUTPUT_FILE=${BASEDIR}/output.`date +%Y%m%d`.html
+HALF_FILE=${BASEDIR}/half.`date +%Y%m%d`.html
                 
 if [ ${USER} != "root" ] ; then
    echo
@@ -20,6 +22,10 @@ if [ ${USER} != "root" ] ; then
    echo
    exit 100
 fi
+
+true > $INPUT_FILE
+true > $TMP_FILE
+true > $HALF_FILE
 
 # display all backup on today
 #bpdbjobs  |grep -v -e Active -e Restore -e Queued |grep $TODAY > ${INPUT_FILE}
@@ -54,11 +60,12 @@ JobID, Type, State, Status, Policy, Schedule, Client, DstMedia_Server,
 STARTED, ENDED, ELAPSED, COMPRESSION); 
 }' > ${TMP_FILE} 
 
-# print html header and table head
-print "
-<html><head><title>Netbackup Daily Report</title>
+# print html header
+print "<html><head><title>Netbackup Daily Report</title>
 </head>
-<body>
+<body>" > ${OUTPUT_FILE}
+
+print "<h2>HOSTNAME: "$HOSTNAME"</h2>
 <table border=2 width=\"100%\">
 <tr bgcolor=gray>
 <td nowrap><B>JobID</B></td>
@@ -73,12 +80,10 @@ print "
 <td nowrap><B>Ended</B></td>
 <td nowrap><B>Elapsed</B></td>
 <td nowrap><B>Compression</B></td></tr>
-" > ${OUTPUT_FILE}
+" |tee -a ${OUTPUT_FILE} ${HALF_FILE} 1> /dev/null
+cat ${TMP_FILE} |tee -a ${OUTPUT_FILE} ${HALF_FILE} 1> /dev/null
+print "</table>" |tee -a ${OUTPUT_FILE} ${HALF_FILE} 1> /dev/null
 
-cat ${TMP_FILE} >> ${OUTPUT_FILE}
-
-print "</table>" >> ${OUTPUT_FILE}
+# print html tailer
 print "</body></html>" >> ${OUTPUT_FILE}
 
-rm -f $INPUT_FILE
-rm -f $TMP_FILE
