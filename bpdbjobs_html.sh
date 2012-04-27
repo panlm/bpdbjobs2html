@@ -1,20 +1,24 @@
-#!/usr/bin/ksh
+#!/bin/ksh
 # this script used to convert bpdbjobs output to html format.
 # create : Nov 10 2004
-# author : dntadm2
+# author : stevenpan@gmail.com
 
 set -u
 
-HOSTLIST="zjbbak zjsnbak1 zjrbak1"
+HOSTLIST="bak"
 PATH=$PATH:/usr/openv/netbackup/bin/admincmd
-BASEDIR=/app/dnt/dntadm2/backup
-TZ=EAT+4
-YESTERDAY=`date +%D`
-TZ=EAT-8
-#YESTERDAY=11/28/04
+BASEDIR=/usr/local/bpdbjobs_html/backup
+
+#Sample: YESTERDAY=11/28/04
+#TZ=EAT+4
+#YESTERDAY=`date +%D`
+#TZ=EAT-8
+
+YESTERDAY=`date --date 'yesterday' +%D`
 
 INPUTFILE=${BASEDIR}/inputfile
 OUTPUTFILE=${BASEDIR}/backup_daily_report.`date +%Y%m%d`.html
+OUTPUTFILESHOPEX=${BASEDIR}/backup_daily_report_shopex.`date +%Y%m%d`.html
 TMPFILE=${BASEDIR}/tmpfile
 TMPFILE1=/var/tmp/bptmpfile1
 TMPFILE2=/var/tmp/bptmpfile2
@@ -34,12 +38,12 @@ print "<html><head><title>Netbackup Daily Report</title>
 for i in $HOSTLIST ; do
 
 if [ $i = "zjrbak1" ] ; then
-  remsh $i -n "/usr/openv/netbackup/bin/admincmd/bpdbjobs  |grep -v -e Active -e Queued " |\
-  awk '{ if ( substr($0,162,8) >= "'$YESTERDAY'" ) print $0 }' > ${INPUTFILE}
+    ssh $i "/usr/openv/netbackup/bin/admincmd/bpdbjobs  |grep -v -e Active -e Queued " |\
+        awk '{ if ( substr($0,162,8) >= "'$YESTERDAY'" ) print $0 }' > ${INPUTFILE}
 else
-  remsh $i -n "/usr/openv/netbackup/bin/admincmd/bpdbjobs  |grep -v -e Active -e Queued " |\
-  awk '{ if ( substr($0,162,8) >= "'$YESTERDAY'" ) print $0 }' |\
-  awk '{ if (( $4 == 0 ) && $0 ~ /Default-Application-Backup/ ) next; else print $0 }' > ${INPUTFILE}
+    ssh $i "/usr/openv/netbackup/bin/admincmd/bpdbjobs  |grep -v -e Active -e Queued " |\
+        awk '{ if ( substr($0,162,8) >= "'$YESTERDAY'" ) print $0 }' |\
+        awk '{ if (( $4 == 0 ) && $0 ~ /Default-Application-Backup/ ) next; else print $0 }' > ${INPUTFILE}
 fi
 
 cat ${INPUTFILE} | awk '{
@@ -75,7 +79,7 @@ STARTED,
 ENDED,
 ELAPSED,
 COMPRESSION);
-system(" remsh '$i' -n \"/usr/openv/netbackup/bin/admincmd/bperror -S "Tmp" \" |tr -s \\'\'' \\. |tr -s \\\" \\. |xargs |grep -v \"the requested operation was successfully completed\" |xargs >> '$TMPFILE2'");
+system(" ssh '$i' \"/usr/openv/netbackup/bin/admincmd/bperror -S "Tmp" \" |tr -s \\'\'' \\. |tr -s \\\" \\. |xargs |grep -v \"the requested operation was successfully completed\" |xargs >> '$TMPFILE2'");
 system("echo \"</td></tr>\" >> '$TMPFILE3'")
 }' > $TMPFILE1
 
@@ -109,19 +113,90 @@ done
 # print html tailer
 print "</body></html>" >> ${OUTPUTFILE}
 
-#
-# auto ftp to whftp.zj.chinamobile.com
-#
-DATE=`date +%Y%m%d`
-DATE1=`date +%Y%m`
+# create report for shopex
+cat ${OUTPUTFILE} |awk '{
+    if ($0 ~ /^<tr>/) {
+        if ($0 ~ /ent21host1/) {
+            print
+        }
+    } else {
+        print
+    }
+}' >${OUTPUTFILESHOPEX}
 
-ftp -vin << EOF
-open 10.70.49.25
-user dnt dnt12345
-cd "/【3】维护记录/【1】作业记录/【6】主机"
-cd "【3】备份作业情况检查"
-cd $DATE1
-lcd $BASEDIR
-put ${OUTPUTFILE##*/}
-bye
+# send mail
+tmp1=/tmp/$$.1
+
+cat >$tmp1 <<EOF
+MAIL FROM: <panlm@yinji.com.cn>
+RCPT TO: <zhangyao@yinji.com.cn>
+RCPT TO: <panlm@yinji.com.cn>
+DATA
+From: panlm@yinji.com.cn 
+To: <zhangyao@yinji.com.cn> 
+Cc: <panlm@yinji.com.cn> 
+Subject: VIP-platform Netbackup Daily Report 
+MIME-Version: 1.0 
+Content-Type: multipart/alternative; 
+	boundary="----=_NextPart_000_0005_01C5FCC1.CD7239B0" 
+
+This is a multi-part message in MIME format.  
+
+------=_NextPart_000_0005_01C5FCC1.CD7239B0 
+Content-Type: text/html; 
+	charset="gb2312" 
+Content-Transfer-Encoding: base64 
+
 EOF
+
+base64 < ${OUTPUTFILE} |sed 's/$//' >>$tmp1
+
+cat >>$tmp1 <<EOF
+
+------=_NextPart_000_0005_01C5FCC1.CD7239B0--
+
+.
+QUIT
+EOF
+
+nc localhost 25 <$tmp1
+
+rm -f $tmp1
+
+# send mail for shopex
+tmp1=/tmp/$$.1
+
+cat >$tmp1 <<EOF
+MAIL FROM: <panlm@yinji.com.cn>
+RCPT TO: <panlm@yinji.com.cn>
+DATA
+From: panlm@yinji.com.cn 
+To: <panlm@yinji.com.cn> 
+Subject: VIP-platform Netbackup Daily Report ShopEX 
+MIME-Version: 1.0 
+Content-Type: multipart/alternative; 
+	boundary="----=_NextPart_000_0005_01C5FCC1.CD7239B0" 
+
+This is a multi-part message in MIME format.  
+
+------=_NextPart_000_0005_01C5FCC1.CD7239B0 
+Content-Type: text/html; 
+	charset="gb2312" 
+Content-Transfer-Encoding: base64 
+
+EOF
+
+base64 < ${OUTPUTFILESHOPEX} |sed 's/$//' >>$tmp1
+
+cat >>$tmp1 <<EOF
+
+------=_NextPart_000_0005_01C5FCC1.CD7239B0--
+
+.
+QUIT
+EOF
+
+nc localhost 25 <$tmp1
+
+rm -f $tmp1
+
