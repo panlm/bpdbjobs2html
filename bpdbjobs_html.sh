@@ -1,42 +1,48 @@
 #!/usr/bin/ksh
+# this script used to convert bpdbjobs output to html format.
+# create : Nov 10 2004
+# author : dntadm2
 
 set -u
-HOSTNAME=`hostname`
-PATH=$PATH:/usr/openv/netbackup//bin/admincmd
-BASEDIR=/home/dntadm2/backup
-UNAME=`uname -a`
+
+HOSTLIST="zjbbak zjsnbak1 zjrbak1"
+PATH=$PATH:/usr/openv/netbackup/bin/admincmd
+BASEDIR=/app/dnt/dntadm2/backup
 TZ=EAT+4
 YESTERDAY=`date +%D`
 TZ=EAT-8
-USER=`whoami`
-#YESTERDAY=10/17/04
+#YESTERDAY=11/28/04
 
-INPUT_FILE=${BASEDIR}/inputfile
-TMP_FILE=${BASEDIR}/tmpfile
-OUTPUT_FILE=${BASEDIR}/output.`date +%Y%m%d`.html
-HALF_FILE=${BASEDIR}/half.`date +%Y%m%d`.html
+INPUTFILE=${BASEDIR}/inputfile
+OUTPUTFILE=${BASEDIR}/backup_daily_report.`date +%Y%m%d`.html
+TMPFILE=${BASEDIR}/tmpfile
+TMPFILE1=/var/tmp/bptmpfile1
+TMPFILE2=/var/tmp/bptmpfile2
+TMPFILE3=/var/tmp/bptmpfile3
                 
-if [ ${USER} != "root" ] ; then
-   echo
-   echo "Using root to execute this script."
-   echo
-   exit 100
-fi
+true > $INPUTFILE
+true > $TMPFILE
 
-true > $INPUT_FILE
-true > $TMP_FILE
-true > $HALF_FILE
+# print html header
+print "<html><head><title>Netbackup Daily Report</title>
+</head>
+<body>" > ${OUTPUTFILE}
 
 # display all backup on today
-#bpdbjobs  |grep -v -e Active -e Restore -e Queued |grep $TODAY > ${INPUT_FILE}
+#bpdbjobs  |grep -v -e Active -e Restore -e Queued |grep $TODAY > ${INPUTFILE}
 
-# display all backup after 9:00 on yesterday
-bpdbjobs  |grep -v -e Active -e Queued |awk -v yesterday=$YESTERDAY '{
-if ( substr($0,162,8) >= yesterday ) print $0 }' | awk '{
-if (( $4 == 0 ) && $0 ~ /Default-Application-Backup/ ) next; else print $0 }' > ${INPUT_FILE}
+for i in $HOSTLIST ; do
 
-cat ${INPUT_FILE} | awk '{
+if [ $i = "zjrbak1" ] ; then
+  remsh $i -n "/usr/openv/netbackup/bin/admincmd/bpdbjobs  |grep -v -e Active -e Queued " |\
+  awk '{ if ( substr($0,162,8) >= "'$YESTERDAY'" ) print $0 }' > ${INPUTFILE}
+else
+  remsh $i -n "/usr/openv/netbackup/bin/admincmd/bpdbjobs  |grep -v -e Active -e Queued " |\
+  awk '{ if ( substr($0,162,8) >= "'$YESTERDAY'" ) print $0 }' |\
+  awk '{ if (( $4 == 0 ) && $0 ~ /Default-Application-Backup/ ) next; else print $0 }' > ${INPUTFILE}
+fi
 
+cat ${INPUTFILE} | awk '{
 JobID=substr($0,1,10);
 Type=substr($0,12,20);
 State=substr($0,33,10);
@@ -48,25 +54,38 @@ DstMedia_Server=substr($0,138,20);
 STARTED=substr($0,159,20);
 ENDED=substr($0,180,20);
 ELAPSED=substr($0,201,10);
-COMPRESSION=substr($0,212,15)
+COMPRESSION=substr($0,212,15);
+Tmp=Status
 
 if (Status == 0 || Status == 1)
     Status="<td bgcolor=green><B><center>" Status "</center></B></td>"
 else 
     Status="<td bgcolor=red><B><center>" Status "</center></B></td>" 
 
-printf("<tr><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td>%s<td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td></tr>\n",
-JobID, Type, State, Status, Policy, Schedule, Client, DstMedia_Server, 
-STARTED, ENDED, ELAPSED, COMPRESSION); 
-}' > ${TMP_FILE} 
+printf("<tr><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td>%s<td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td nowrap>%s</td><td>\n",
+JobID,
+Type,
+State,
+Status,
+Policy,
+Schedule,
+Client,
+DstMedia_Server,
+STARTED,
+ENDED,
+ELAPSED,
+COMPRESSION);
+system(" remsh '$i' -n \"/usr/openv/netbackup/bin/admincmd/bperror -S "Tmp" \" |tr -s \\'\'' \\. |tr -s \\\" \\. |xargs |grep -v \"the requested operation was successfully completed\" |xargs >> '$TMPFILE2'");
+system("echo \"</td></tr>\" >> '$TMPFILE3'")
+}' > $TMPFILE1
 
-# print html header
-print "<html><head><title>Netbackup Daily Report</title>
-</head>
-<body>" > ${OUTPUT_FILE}
+paste -d "" $TMPFILE1 $TMPFILE2 $TMPFILE3 > $TMPFILE
+cp /dev/null $TMPFILE1
+cp /dev/null $TMPFILE2
+cp /dev/null $TMPFILE3
 
-print "<h2>HOSTNAME: "$HOSTNAME"</h2>
-<table border=2 width=\"100%\">
+print "<h2>HOSTNAME: "$i" ("`date`")</h2>
+<table border=2 width=\"200%\">
 <tr bgcolor=gray>
 <td nowrap><B>JobID</B></td>
 <td nowrap><B>Type</B></td>
@@ -79,11 +98,30 @@ print "<h2>HOSTNAME: "$HOSTNAME"</h2>
 <td nowrap><B>Started</B></td>
 <td nowrap><B>Ended</B></td>
 <td nowrap><B>Elapsed</B></td>
-<td nowrap><B>Compression</B></td></tr>
-" |tee -a ${OUTPUT_FILE} ${HALF_FILE} 1> /dev/null
-cat ${TMP_FILE} |tee -a ${OUTPUT_FILE} ${HALF_FILE} 1> /dev/null
-print "</table>" |tee -a ${OUTPUT_FILE} ${HALF_FILE} 1> /dev/null
+<td nowrap><B>Compression</B></td>
+<td width=750><B>Reason</B></td></tr>
+" >> ${OUTPUTFILE}
+cat ${TMPFILE} >> ${OUTPUTFILE}
+print "</table>" >> ${OUTPUTFILE}
+
+done
 
 # print html tailer
-print "</body></html>" >> ${OUTPUT_FILE}
+print "</body></html>" >> ${OUTPUTFILE}
 
+#
+# auto ftp to whftp.zj.chinamobile.com
+#
+DATE=`date +%Y%m%d`
+DATE1=`date +%Y%m`
+
+ftp -vin << EOF
+open 10.70.49.25
+user dnt dnt12345
+cd "/【3】维护记录/【1】作业记录/【6】主机"
+cd "【3】备份作业情况检查"
+cd $DATE1
+lcd $BASEDIR
+put ${OUTPUTFILE##*/}
+bye
+EOF
